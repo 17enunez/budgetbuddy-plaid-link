@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connect your bank · BudgetBuddy</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; margin: 0; padding: 24px;
+      background: #f6f7f9;
+    }
+    main {
+      max-width: 480px; width: 100%;
+      background: white; border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+      padding: 32px; text-align: center;
+    }
+    h1 { margin: 0 0 12px; font-size: 1.4rem; }
+    p  { margin: 0; color: #555; line-height: 1.5; }
+    pre {
+      text-align: left; background: #fff5f5; color: #800;
+      padding: 12px; border-radius: 8px; overflow-x: auto;
+      font-size: 0.85rem; margin-top: 16px;
+    }
+    .ok h1 { color: #1a7f3a; }
+  </style>
+  <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+</head>
+<body>
+  <main id="root">
+    <h1>Opening Plaid Link…</h1>
+    <p>Pick your bank in the popup that just appeared.</p>
+  </main>
+  <script>
+    (function () {
+      // Hardcoded because this file is hosted on Supabase Storage; both this
+      // page and the exchange endpoint live under the same project domain.
+      var SUPABASE_URL = "https://yurgwiohehpmgxubntni.supabase.co";
+      var EXCHANGE_URL = SUPABASE_URL + "/functions/v1/plaid-exchange-token";
+
+      // Read link_token + session_id from the URL hash fragment.
+      // Hash fragments aren't sent to the server, so Supabase Storage never
+      // sees them; only this JS does. URL shape:
+      //   .../link.html#link_token=...&session_id=...
+      var params     = new URLSearchParams(window.location.hash.slice(1));
+      var LINK_TOKEN = params.get("link_token") || "";
+      var SESSION_ID = params.get("session_id") || "";
+      var root       = document.getElementById("root");
+
+      function render(state, message, detail) {
+        root.className = state || "";
+        var html = "<h1>" + message + "</h1>";
+        if (detail) html += "<pre>" + detail + "</pre>";
+        root.innerHTML = html;
+      }
+
+      if (!LINK_TOKEN || !SESSION_ID) {
+        render("err", "Missing link_token or session_id in URL hash", "");
+        return;
+      }
+
+      var handler = Plaid.create({
+        token: LINK_TOKEN,
+        onSuccess: async function (public_token /*, metadata */) {
+          render("loading", "Finishing connection…", "");
+          try {
+            var res = await fetch(EXCHANGE_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session_id: SESSION_ID,
+                public_token: public_token
+              })
+            });
+            var data = await res.json().catch(function () { return {}; });
+            if (res.ok && data.ok) {
+              render("ok", "Connected! You can close this window.", "");
+            } else {
+              render(
+                "err",
+                "Connection failed",
+                JSON.stringify(data, null, 2)
+              );
+            }
+          } catch (e) {
+            render("err", "Network error", String(e));
+          }
+        },
+        onExit: function (err /*, metadata */) {
+          if (err) {
+            render("err", "Plaid Link exited", JSON.stringify(err, null, 2));
+          } else {
+            render("loading", "Link cancelled. You can close this window.", "");
+          }
+        }
+      });
+      handler.open();
+    })();
+  </script>
+</body>
+</html>
